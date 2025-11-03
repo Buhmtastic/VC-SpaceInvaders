@@ -10,11 +10,12 @@ WHITE = (255, 255, 255)
 
 # --- Player Class ---
 class Player(pygame.sprite.Sprite):
-    def __init__(self, screen):
+    def __init__(self, screen, sprite_sheet):
         super().__init__()
         self.screen = screen
-        self.image = pygame.Surface((50, 30))
-        self.image.fill((50, 205, 50)) # Lime Green
+        self.sprite_sheet = sprite_sheet # Store sprite sheet
+        self.image = pygame.Surface((24, 24), pygame.SRCALPHA)
+        self.image.blit(self.sprite_sheet, (0, 0), pygame.Rect(192, 0, 24, 24))
         self.rect = self.image.get_rect(
             center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 50)
         )
@@ -33,7 +34,7 @@ class Player(pygame.sprite.Sprite):
 
     def shoot(self, bullets):
         if not bullets:
-            bullet = Bullet(self.rect.centerx, self.rect.top)
+            bullet = Bullet(self.rect.centerx, self.rect.top, self.sprite_sheet)
             bullets.add(bullet)
 
     def lose_life(self):
@@ -42,11 +43,38 @@ class Player(pygame.sprite.Sprite):
 
 # --- Alien Class ---
 class Alien(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, row, sprite_sheet):
         super().__init__()
-        self.image = pygame.Surface((40, 30))
-        self.image.fill((255, 0, 0)) # Red
+        
+        # Determine alien type based on row
+        if row == 0:
+            offset = 96  # Top row alien
+        elif 1 <= row <= 2:
+            offset = 144  # Middle row alien
+        else:  # Rows 3 & 4
+            offset = 96  # Bottom row alien (reusing top row sprite)
+
+        self.images = (pygame.Surface((24, 24), pygame.SRCALPHA),
+                       pygame.Surface((24, 24), pygame.SRCALPHA))
+        
+        # Extract two frames for animation from the sprite sheet
+        strip_rect1 = pygame.Rect(offset, 0, 24, 24)
+        strip_rect2 = pygame.Rect(offset + 24, 0, 24, 24)
+        self.images[0].blit(sprite_sheet, (0, 0), strip_rect1)
+        self.images[1].blit(sprite_sheet, (0, 0), strip_rect2)
+
+        self.image_index = 0
+        self.image = self.images[self.image_index]
         self.rect = self.image.get_rect(topleft=(x, y))
+        self.animation_timer = pygame.time.get_ticks()
+
+    def update(self):
+        # Animate the alien by switching between its two images
+        now = pygame.time.get_ticks()
+        if now - self.animation_timer > 500:
+            self.image_index = (self.image_index + 1) % 2
+            self.image = self.images[self.image_index]
+            self.animation_timer = now
 
 # --- Bunker Class ---
 class Bunker(pygame.sprite.Sprite):
@@ -69,8 +97,8 @@ class Bunker(pygame.sprite.Sprite):
 class UFO(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
-        self.image = pygame.Surface((60, 25))
-        self.image.fill((255, 0, 255)) # Magenta
+        self.image = pygame.Surface((60, 25), pygame.SRCALPHA) # Use SRCALPHA for transparency
+        pygame.draw.ellipse(self.image, (255, 0, 255), [0, 0, 60, 25]) # Draw magenta ellipse
         self.rect = self.image.get_rect(center=(-30, 30))
         self.speed = 3
 
@@ -81,10 +109,10 @@ class UFO(pygame.sprite.Sprite):
 
 # --- Bullet Class ---
 class Bullet(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, sprite_sheet):
         super().__init__()
-        self.image = pygame.Surface((5, 15))
-        self.image.fill((255, 255, 0)) # Yellow
+        self.image = pygame.Surface((24, 24), pygame.SRCALPHA)
+        self.image.blit(sprite_sheet, (0, 0), pygame.Rect(0, 0, 24, 24)) # Beam sprite
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = -8
 
@@ -95,10 +123,10 @@ class Bullet(pygame.sprite.Sprite):
 
 # --- Alien Bullet Class ---
 class AlienBullet(pygame.sprite.Sprite):
-    def __init__(self, x, y):
+    def __init__(self, x, y, sprite_sheet):
         super().__init__()
-        self.image = pygame.Surface((5, 15))
-        self.image.fill((255, 105, 180)) # Hot Pink
+        self.image = pygame.Surface((24, 24), pygame.SRCALPHA)
+        self.image.blit(sprite_sheet, (0, 0), pygame.Rect(48, 0, 24, 24)) # Bomb sprite
         self.rect = self.image.get_rect(center=(x, y))
         self.speed = 5
 
@@ -115,7 +143,8 @@ class Game:
         pygame.display.set_caption("VC-SpaceInvaders")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.player = Player(self.screen)
+        self.sprite_sheet = pygame.image.load("reference\\strip.png").convert_alpha()
+        self.player = Player(self.screen, self.sprite_sheet)
         self.bullets = pygame.sprite.Group()
         self.aliens = pygame.sprite.Group()
         self.alien_bullets = pygame.sprite.Group()
@@ -129,6 +158,7 @@ class Game:
         self.score = 0
         self.wave_number = 1
         self.highscore = self.load_highscore()
+        pygame.mixer.music.load("sound\\VC-SpaceInvader_MainTheme.mp3")
         self._create_alien_grid()
         self._create_bunkers()
 
@@ -148,7 +178,8 @@ class Game:
         self.aliens.empty()
         for row in range(5):
             for col in range(11):
-                alien = Alien(col * 60 + 60, row * 40 + 50)
+                # Adjusted spacing for 24x24 sprites
+                alien = Alien(col * 40 + 60, row * 40 + 50, row, self.sprite_sheet)
                 self.aliens.add(alien)
 
     def _create_bunkers(self):
@@ -159,12 +190,14 @@ class Game:
 
     def run(self):
         """Main game loop"""
+        pygame.mixer.music.play(-1) # Play music on loop
         while self.running:
             self.handle_events()
             self.update()
             self.draw()
             self.clock.tick(60)
 
+        pygame.mixer.music.stop() # Stop music
         self.save_highscore()
         pygame.quit()
         sys.exit()
@@ -202,7 +235,7 @@ class Game:
         if self.alien_fire_timer > 1000: # Fire every 1000ms (1 second)
             if self.aliens.sprites():
                 random_alien = random.choice(self.aliens.sprites())
-                alien_bullet = AlienBullet(random_alien.rect.centerx, random_alien.rect.bottom)
+                alien_bullet = AlienBullet(random_alien.rect.centerx, random_alien.rect.bottom, self.sprite_sheet)
                 self.alien_bullets.add(alien_bullet)
             self.alien_fire_timer = 0
 
@@ -215,8 +248,8 @@ class Game:
                 break
 
         # Calculate speed based on number of aliens and wave number
-        speed_multiplier = 1 + (55 - len(self.aliens)) * 0.05
-        wave_speed_bonus = self.wave_number * 0.5
+        speed_multiplier = 1 + (55 - len(self.aliens)) * 0.02 # Reduced acceleration
+        wave_speed_bonus = self.wave_number * 0.2 # Reduced wave speed bonus
         alien_speed = (wave_speed_bonus + speed_multiplier) * self.alien_direction
 
         for alien in self.aliens.sprites():
